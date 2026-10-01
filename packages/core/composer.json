@@ -1,0 +1,37 @@
+{
+    "name": "php-turbo/admin-core",
+    "description": "Core framework-agnóstico do php-turbo-admin: schema, camadas de metadados e regras de segurança.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["admin", "panel", "crud", "headless"],
+    "require": {
+        "php": "^8.2"
+    },
+    "require-dev": {
+        "pestphp/pest": "^3.8|^4.0",
+        "phpstan/phpstan": "^2.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "PhpTurbo\\Admin\\Core\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PhpTurbo\\Admin\\Core\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "pest --parallel",
+        "test:coverage": "pest --coverage --min=95",
+        "analyse": "phpstan analyse --memory-limit=1G"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

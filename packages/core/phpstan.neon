@@ -1,0 +1,6 @@
+# O core roda com vendor isolado: qualquer referência a Illuminate/Symfony/Doctrine
+# vira "classe desconhecida" e quebra a análise. É a garantia de que o core é agnóstico.
+parameters:
+    level: max
+    paths:
+        - src

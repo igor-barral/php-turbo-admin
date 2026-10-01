@@ -1,0 +1,149 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: core · PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4', '8.5']
+    defaults:
+      run:
+        working-directory: packages/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: pcov
+      - run: composer update --prefer-dist --no-interaction --no-progress
+      - name: PHPStan (vendor isolado garante que o core não depende de framework)
+        run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - run: vendor/bin/pest --coverage --min=95
+
+  laravel:
+    name: laravel ${{ matrix.laravel }} · PHP ${{ matrix.php }} · ${{ matrix.db }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4', '8.5']
+        laravel: ['12', '13']
+        db: [sqlite]
+        exclude:
+          - php: '8.2'
+            laravel: '13'
+        include:
+          - { php: '8.5', laravel: '13', db: mysql }
+          - { php: '8.5', laravel: '13', db: pgsql }
+          - { php: '8.2', laravel: '12', db: mysql }
+          - { php: '8.2', laravel: '12', db: pgsql }
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: testing
+          MYSQL_USER: sail
+          MYSQL_PASSWORD: password
+          MYSQL_ROOT_PASSWORD: password
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
+      pgsql:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: testing
+          POSTGRES_USER: sail
+          POSTGRES_PASSWORD: password
+        ports: ['5432:5432']
+        options: --health-cmd=pg_isready --health-interval=10s --health-timeout=5s --health-retries=5
+    env:
+      TEST_DB: ${{ matrix.db }}
+      DB_HOST: 127.0.0.1
+    defaults:
+      run:
+        working-directory: packages/laravel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, pdo_mysql, pdo_pgsql
+          coverage: pcov
+      - name: Fixar versão do Laravel
+        run: composer require "illuminate/support:^${{ matrix.laravel }}.0" --no-update --no-interaction
+      - run: composer update --prefer-dist --no-interaction --no-progress --with-all-dependencies
+      - run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - run: vendor/bin/pest --coverage --min=95
+
+  ui:
+    name: ui · svelte-check, vitest, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm run test:coverage
+      - name: Build + orçamento de tamanho
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: packages/laravel/dist
+
+  e2e:
+    name: e2e · Playwright contra o playground
+    needs: ui
+    runs-on: ubuntu-latest
+    env:
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ${{ github.workspace }}/playground/database/e2e.sqlite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_sqlite
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: packages/laravel/dist
+      - name: Preparar playground
+        working-directory: playground
+        run: |
+          composer install --prefer-dist --no-interaction --no-progress
+          cp .env.example .env
+          php artisan key:generate
+          touch "$DB_DATABASE"
+          php artisan migrate:fresh --seed --force
+          php artisan serve --port=8080 > /tmp/serve.log 2>&1 &
+      - name: Playwright
+        working-directory: packages/ui
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: packages/ui/test-results
